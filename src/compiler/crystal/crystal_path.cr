@@ -70,14 +70,20 @@ module Crystal
             return make_relative_unless_absolute relative_filename_cr
           end
 
-          # If it's a directory, we check if a .cr file with a name the same as the
-          # directory basename exists, and we require that one.
-          if Dir.exists?(relative_filename)
+          if slash_index = filename.index('/')
+            # If it's "foo/bar/baz", check if "foo/src/bar/baz.cr" exists (for a shard, non-namespaced structure)
+            before_slash, after_slash = filename.split('/', 2)
+            absolute_filename = make_relative_unless_absolute("#{relative_to}/#{before_slash}/src/#{after_slash}.cr")
+            return absolute_filename if File.exists?(absolute_filename)
+
+            # Then check if "foo/src/bar/baz.cr" exists (for a shard, namespaced structure)
+            absolute_filename = make_relative_unless_absolute("#{relative_to}/#{before_slash}/src/#{before_slash}/#{after_slash}.cr")
+            return absolute_filename if File.exists?(absolute_filename)
+          else
+            # If it's "foo", check if "foo/src/foo.cr" exists (for a shard)
             basename = File.basename(relative_filename)
-            absolute_filename = make_relative_unless_absolute("#{relative_filename}/#{basename}.cr")
-            if File.exists?(absolute_filename)
-              return absolute_filename
-            end
+            absolute_filename = make_relative_unless_absolute("#{relative_filename}/src/#{basename}.cr")
+            return absolute_filename if File.exists?(absolute_filename)
           end
         end
       end
