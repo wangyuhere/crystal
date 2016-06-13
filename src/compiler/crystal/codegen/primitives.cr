@@ -466,24 +466,31 @@ class Crystal::CodeGenVisitor
     allocate_aggregate node.type
   end
 
-  def codegen_primitive_struct_set(node, target_def, call_args)
-    set_aggregate_field(node, target_def, call_args) do
-      type = context.type.as(CStructOrUnionType)
-      name = target_def.name[0..-2]
+  def codegen_primitive_struct_set(node, target_def : Def, call_args : Array)
+    codegen_primitive_struct_set(node, target_def.name[0..-2], call_args[0], call_args[1])
+  end
 
-      struct_field_ptr(type, name, call_args[0])
+  def codegen_primitive_struct_set(node, name : String, type_ptr, value)
+    set_aggregate_field(node, name, value) do
+      struct_field_ptr(type, name, type_ptr)
     end
   end
 
   def codegen_primitive_struct_get(node, target_def, call_args)
-    type = context.type.as(CStructType)
     value = to_lhs struct_field_ptr(type, target_def.name, call_args[0]), node.type
     value = check_c_fun node.type, value
     value
   end
 
   def struct_field_ptr(type, field_name, pointer)
-    index = type.index_of_var(field_name)
+    case type
+    when CStructOrUnionType
+      index = type.index_of_var(field_name)
+    when NonGenericClassType
+      index = type.index_of_instance_var("@#{field_name}")
+    else
+      raise "Bug: expected CStructOrUnionType or NonGenericClassType"
+    end
     aggregate_index pointer, index
   end
 
@@ -491,9 +498,13 @@ class Crystal::CodeGenVisitor
     allocate_aggregate node.type
   end
 
-  def codegen_primitive_union_set(node, target_def, call_args)
-    set_aggregate_field(node, target_def, call_args) do |field_type|
-      union_field_ptr(field_type, call_args[0])
+  def codegen_primitive_union_set(node, target_def : Def, call_args : Array)
+    codegen_primitive_union_set(node, target_def.name[0..-2], call_args[0], call_args[1])
+  end
+
+  def codegen_primitive_union_set(node, name : String, type_ptr, value)
+    set_aggregate_field(node, name, value) do |field_type|
+      union_field_ptr(field_type, type_ptr)
     end
   end
 
@@ -503,12 +514,12 @@ class Crystal::CodeGenVisitor
     value
   end
 
-  def set_aggregate_field(node, target_def, call_args)
-    call_arg = call_args[1]
+  def set_aggregate_field(node, name : String, value : LLVM::Value)
+    call_arg = value
     original_call_arg = call_arg
 
     # Check if we need to do a numeric conversion
-    if (extra = node.extra)
+    if node.is_a?(Primitive) && (extra = node.extra)
       existing_value = context.vars["value"]?
       context.vars["value"] = LLVMVar.new(call_arg, node.type, true)
       request_value { extra.accept self }
@@ -516,9 +527,15 @@ class Crystal::CodeGenVisitor
       context.vars["value"] = existing_value if existing_value
     end
 
-    var_name = target_def.name[0...-1]
-    scope = context.type.as(CStructOrUnionType)
-    field_type = scope.vars[var_name].type
+    scope = context.type
+    case scope
+    when CStructOrUnionType
+      field_type = scope.vars[name].type
+    when NonGenericClassType
+      field_type = scope.lookup_instance_var("@#{name}").type
+    else
+      raise "Bug: expected CStructOrUnionType or NonGenericClassType"
+    end
 
     # Check nil to pointer
     if node.type.nil_type? && (field_type.pointer? || field_type.proc?)

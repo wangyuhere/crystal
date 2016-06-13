@@ -4,6 +4,8 @@ require "./syntax/ast"
 module Crystal
   # Abstract base class of all types
   abstract class Type
+    record Extern, union : Bool
+
     property doc : String?
     getter locations : Array(Location)?
     setter metaclass : Type?
@@ -164,6 +166,14 @@ module Crystal
     end
 
     def has_in_type_vars?(type)
+      false
+    end
+
+    def extern
+      nil
+    end
+
+    def packed?
       false
     end
 
@@ -1174,6 +1184,13 @@ module Crystal
     include InstanceVarContainer
     include ClassVarContainer
     include DefInstanceContainer
+
+    property extern : Extern?
+    property? packed = false
+
+    def primitive_like?
+      extern
+    end
 
     def initialize_metaclass(metaclass)
       metaclass.add_def Def.new("allocate", body: Primitive.new(:allocate))

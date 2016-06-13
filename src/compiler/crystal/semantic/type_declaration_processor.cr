@@ -161,6 +161,8 @@ module Crystal
 
       check_class_var_errors(type_decl_visitor.class_vars, type_guess_visitor.class_vars)
 
+      fill_extern_structs
+
       node
     end
 
@@ -170,6 +172,10 @@ module Crystal
       end
 
       remove_error owner, name
+
+      if owner.extern && !type.primitive_like?
+        raise TypeException.new("only primitive types, pointers, structs, unions, enums and tuples are allowed in extern struct declarations", location.not_nil!)
+      end
 
       var = MetaTypeVar.new(name)
       var.owner = owner
@@ -192,7 +198,7 @@ module Crystal
         raise_cant_declare_instance_var(owner, info.location)
       end
 
-      var = declare_meta_type_var(vars, owner, name, info.type.as(Type))
+      var = declare_meta_type_var(vars, owner, name, info.type.as(Type), location: info.location)
       var.location = info.location
 
       # Check if var is uninitialized
@@ -202,6 +208,11 @@ module Crystal
       # in all of the initialize methods, and the explicit type is not nilable,
       # give an error right now
       if instance_var && !var.type.includes_type?(@program.nil)
+        # Don't give an error for extern structs without initialize methods
+        if owner.extern && @initialize_infos[owner].empty?
+          return var
+        end
+
         if nilable_instance_var?(owner, name)
           raise_not_initialized_in_all_initialize(var, name, owner)
         end
@@ -630,6 +641,25 @@ module Crystal
 
     private def raise_not_initialized_in_all_initialize(location : Location, name, owner)
       raise TypeException.new "instance variable '#{name}' of #{owner} was not initialized in all of the 'initialize' methods, rendering it nilable", location
+    end
+
+    private def fill_extern_structs
+      @initialize_infos.each_key do |owner|
+        if extern = owner.extern
+          owner.all_instance_vars.each do |name, var|
+            name = name[1..-1]
+            setter_name = "#{name}="
+
+            unless owner.has_def?(setter_name)
+              owner.add_def Def.new(setter_name, [Arg.new("value")], Primitive.new(extern.union ? :union_set : :struct_set))
+            end
+
+            unless owner.has_def?(name)
+              owner.add_def Def.new(name, body: Primitive.new(extern.union ? :union_get : :struct_get))
+            end
+          end
+        end
+      end
     end
 
     private def raise_doesnt_explicitly_initializes(info, name, ivar)

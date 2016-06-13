@@ -121,6 +121,18 @@ module Crystal
     def visit(node : ClassDef)
       check_outside_block_or_exp node, "declare class"
 
+      extern = nil
+      packed = false
+
+      if node.struct?
+        extern, packed = process_class_def_struct_attributes
+        @attributes = nil
+      else
+        if (attributes = @attributes) && !attributes.empty?
+          node.raise "class declaration can't have attributes"
+        end
+      end
+
       node_superclass = node.superclass
 
       if node_superclass
@@ -203,8 +215,16 @@ module Crystal
         if type_vars = node.type_vars
           type = GenericClassType.new @mod, scope, name, superclass, type_vars, false
           type.splat_index = node.splat_index
+          if extern
+            node.raise "can only use Extern attribute with non-generic structs"
+          end
+          if packed
+            node.raise "can only use Packed attribute with non-generic structs"
+          end
         else
           type = NonGenericClassType.new @mod, scope, name, superclass, false
+          type.extern = extern
+          type.packed = packed
         end
         type.abstract = node.abstract?
         type.struct = node.struct?
@@ -237,6 +257,44 @@ module Crystal
       node.type = @mod.nil
 
       false
+    end
+
+    private def process_class_def_struct_attributes
+      extern = nil
+      packed = false
+
+      @attributes.try &.each do |attr|
+        case attr.name
+        when "Extern"
+          unless attr.args.empty?
+            attr.raise "Extern attribute can't have positional arguments, only named arguments: 'union'"
+          end
+
+          is_union = false
+
+          attr.named_args.try &.each do |named_arg|
+            case named_arg.name
+            when "union"
+              value = named_arg.value
+              if value.is_a?(BoolLiteral)
+                is_union = value.value
+              else
+                value.raise "Extern 'union' attribute must be a boolean, not #{value.class_desc}"
+              end
+            else
+              named_arg.raise "unknown Extern named argument, valid arguments are: 'union'"
+            end
+          end
+
+          extern = Type::Extern.new(union: is_union)
+        when "Packed"
+          packed = true
+        else
+          attr.raise "illegal attribute for struct declaration, valid attributes are: Packed, Extern"
+        end
+      end
+
+      {extern, packed}
     end
 
     def visit(node : ModuleDef)

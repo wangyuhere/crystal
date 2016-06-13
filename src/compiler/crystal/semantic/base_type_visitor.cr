@@ -341,6 +341,8 @@ module Crystal
           end
         when MacroExpression, MacroIf, MacroFor
           # Don't clear attributes that were generating with macros
+        when ClassDef
+          # Don't clear attributes for class declarations (process Extern)
         else
           @attributes = nil
         end

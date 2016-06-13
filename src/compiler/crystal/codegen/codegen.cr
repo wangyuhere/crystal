@@ -861,6 +861,17 @@ module Crystal
       last = @last
 
       set_current_debug_location node if @debug
+
+      # Consider the case of an extern struct/union
+      if target.is_a?(InstanceVar) && (extern = context.type.extern)
+        if extern.union
+          codegen_primitive_union_set(node, target.name[1..-1], llvm_self_ptr, last)
+        else
+          codegen_primitive_struct_set(node, target.name[1..-1], llvm_self_ptr, last)
+        end
+        return false
+      end
+
       ptr = case target
             when InstanceVar
               instance_var_ptr (context.type.as(InstanceVarContainer)), target.name, llvm_self_ptr
@@ -1058,7 +1069,7 @@ module Crystal
       ivar = type.lookup_instance_var_with_owner(name).instance_var
       ivar_ptr = instance_var_ptr type, name, value
       @last = downcast ivar_ptr, node_type, ivar.type, false
-      if type.is_a?(CStructOrUnionType)
+      if type.is_a?(CStructOrUnionType) || type.extern
         # When reading the instance variable of a C struct or union
         # we need to convert C functions to Crystal procs. This
         # can happen for example in Struct#to_s, where all fields
@@ -1955,6 +1966,16 @@ module Crystal
     end
 
     def instance_var_ptr(type, name, pointer)
+      # Consider the case of extern struct/union
+      if (extern = type.extern)
+        if extern.union
+          ivar_type = type.lookup_instance_var(name).type
+          return union_field_ptr(ivar_type, pointer)
+        else
+          return struct_field_ptr(type, name[1..-1], pointer)
+        end
+      end
+
       index = type.index_of_instance_var(name)
 
       unless type.struct?

@@ -1963,13 +1963,13 @@ module Crystal
       when "struct_set"
         visit_struct_or_union_set node
       when "struct_get"
-        visit_struct_get node
+        visit_struct_or_union_get node
       when "union_new"
         node.type = scope.instance_type
       when "union_set"
         visit_struct_or_union_set node
       when "union_get"
-        visit_union_get node
+        visit_struct_or_union_get node
       when "external_var_set"
         # Nothing to do
       when "external_var_get"
@@ -2090,10 +2090,17 @@ module Crystal
     end
 
     def visit_struct_or_union_set(node)
-      scope = @scope.as(CStructOrUnionType)
-
       field_name = call.not_nil!.name[0...-1]
-      expected_type = scope.vars[field_name].type
+
+      case scope = @scope
+      when CStructOrUnionType
+        expected_type = scope.vars[field_name].type
+      when NonGenericClassType
+        expected_type = scope.lookup_instance_var("@#{field_name}", create: false).type
+      else
+        raise "Bug: expected CStructOrUnionType or NonGenericClassType"
+      end
+
       value = @vars["value"]
       actual_type = value.type
 
@@ -2131,14 +2138,17 @@ module Crystal
       Conversions.numeric_argument(node, Var.new("value"), self, unaliased_type, expected_type, actual_type)
     end
 
-    def visit_struct_get(node)
-      scope = @scope.as(CStructType)
-      node.bind_to scope.vars[untyped_def.name]
-    end
+    def visit_struct_or_union_get(node)
+      field_name = untyped_def.name
 
-    def visit_union_get(node)
-      scope = @scope.as(CUnionType)
-      node.bind_to scope.vars[untyped_def.name]
+      case scope = @scope
+      when CStructOrUnionType
+        node.bind_to scope.vars[field_name]
+      when NonGenericClassType
+        node.bind_to scope.lookup_instance_var("@#{field_name}", create: false)
+      else
+        raise "Bug: expected CStructOrUnionType or NonGenericClassType"
+      end
     end
 
     def visit(node : PointerOf)
