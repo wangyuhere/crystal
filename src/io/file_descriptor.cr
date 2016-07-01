@@ -305,6 +305,7 @@ class IO::FileDescriptor
     event = @write_event ||= EventLoop.create_fd_write_event(self)
     Fiber.current.callback = ->{
       event.add timeout
+      nil
     }
     nil
   end
